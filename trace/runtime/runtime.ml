@@ -22,7 +22,7 @@ let collect_perf = ref false
 let trace_noprint = ref false
 let cur_pred = ref None
 
-type message_kind = Start | Stop of { cause : string; time : float } | Info
+type message_kind = Start | Stop of { cause : string; time : float } | Info | Meta
 type j = J : (F.formatter -> 'a -> unit) * 'a -> j
 type message = {
   runtime_id : int;
@@ -178,6 +178,9 @@ let info ~runtime_id ?(goal_id=0) k payload =
  if not !trace_noprint && Trace.condition ~runtime_id k then
    !printer { runtime_id; goal_id ; name = k; step = Trace.get_cur_step ~runtime_id k; kind = Info; payload }
 
+let meta k payload =
+  if not !trace_noprint then
+    !printer { runtime_id = -1; goal_id = -1; name = k; step = -1; kind = Meta; payload }
 
 exception TREC_CALL of Obj.t * Obj.t (* ('a -> 'b) * 'a *)
 exception OK
@@ -200,6 +203,7 @@ let print_json fmt  = (); fun { runtime_id; goal_id; kind; name; step; payload }
   let kind : Trace_atd.kind list = [match kind with
     | Start -> `Start
     | Info -> `Info
+    | Meta -> `Meta
     | Stop { cause; time } -> `Stop { cause; time }] in
   let payload =
     let b = Buffer.create 100 in
@@ -231,6 +235,8 @@ let print_tty fmt = (); fun { runtime_id; goal_id; kind; name; step; payload } -
     F.fprintf fmt "%s %d {{{@[<hov1> %a@]\n%!" name step (pplist pp_j) payload
   | Stop { cause; time } ->
     F.fprintf fmt "}}} %s  (%.3fs)\n%!" cause time
+  | Meta ->
+    F.fprintf fmt "META %s @[<hov 1> %a@]\n%!" name (pplist pp_j) payload
   | Info ->
     let () = F.fprintf fmt "  @[<hov 2>rid:%d step:%d gid:%d %s =@ " runtime_id step goal_id name in
     let () = match payload with

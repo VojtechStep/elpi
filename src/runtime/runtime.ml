@@ -10,6 +10,8 @@ module F = Ast.Func
 open Util
 open Data
 
+let trace_version = "3"
+
 (* Internal notion of constraint *)
 type constraint_def = {
   cdepth : int;
@@ -4041,6 +4043,8 @@ let pp_CHR_resumed_goal { depth; program; goal; gid = gid[@trace] } =
   [@@warning "-32"]
 
 
+let is_first_runtime = ref true
+
 (* The block of recursive functions spares the allocation of a Some/None
  * at each iteration in order to know if one needs to backtrack or continue *)
 let make_runtime : ?max_steps: int -> ?delay_outside_fragment: bool -> executable -> runtime =
@@ -4436,6 +4440,9 @@ end;*)
   set FFI.builtins builtins;
   set rid !max_runtime_id;
   let search = exec (fun () ->
+      if !is_first_runtime then begin
+        [%meta "trace_version" pp_string trace_version];
+        is_first_runtime := false end;
      [%spy "dev:trail:init" ~rid (fun fmt () -> T.print_trail fmt) ()];
      let gid[@trace] = UUID.make () in
      [%spy "user:newgoal" ~rid ~gid (uppterm initial_depth [] ~argsdepth:0 empty_env) initial_goal];

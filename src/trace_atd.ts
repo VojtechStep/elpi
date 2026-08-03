@@ -27,6 +27,7 @@ export type Kind =
 | { kind: 'Start' }
 | { kind: 'Info' }
 | { kind: 'Stop'; value: Stop }
+| { kind: 'Meta' }
 
 export type Stop = {
   cause: string;
@@ -224,6 +225,8 @@ export function writeKind(x: Kind, context: any = x): any {
       return 'Info'
     case 'Stop':
       return ['Stop', writeStop(x.value, x)]
+    case 'Meta':
+      return 'Meta'
   }
 }
 
@@ -234,6 +237,8 @@ export function readKind(x: any, context: any = x): Kind {
         return { kind: 'Start' }
       case 'Info':
         return { kind: 'Info' }
+      case 'Meta':
+        return { kind: 'Meta' }
       default:
         _atd_bad_json('Kind', x, context)
         throw new Error('impossible')

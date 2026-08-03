@@ -5,6 +5,8 @@
 
     type t = { a : T; b : S [@trace] }
 
+    let () = [%meta "version" pp_string "3"]
+
     let rec f x (w[@trace]) =
      [%trace "f" (fun fmt -> .. x ..) begin
          match x with
@@ -33,7 +35,7 @@
     - [[%end_trace "stop" ~rid]] ---> [()]
     - [[%trace "foo" pp code]] ---> [code]
     - [[%tcall f x]] ---> [f x]
-    - [[%spy ...]] [[%spyl ...]] and [[%log ...]] ---> [()]
+    - [[%spy ...]] [[%spyl ...]] [[%meta ...]] and [[%log ...]] ---> [()]
     - [f x (y[@trace]) z] ---> [f x z]
     - [let x[@trace] = .. in e] ---> [e]
     - [type x = { a : T; b : T [@trace] }] ---> [type x = { a : T }]
@@ -95,6 +97,16 @@ let spyl ~loc err ?(cond=[%expr true]) ~rid ?gid name pp =
   match gid with
   | None -> [%expr if [%e cond] then Trace_ppx_runtime.Runtime.info ~runtime_id:![%e rid] [%e name] [%e ppl]]
   | Some gid -> [%expr if [%e cond] then Trace_ppx_runtime.Runtime.info ~runtime_id:![%e rid] ~goal_id:(Util.UUID.hash [%e gid]) [%e name] [%e ppl]]
+
+let meta ~loc err name pp =
+  let ppl =
+    let rec aux = function
+      | [] -> [%expr []]
+      | [_] -> err ~loc ()
+      | p :: x :: xs -> [%expr Trace_ppx_runtime.Runtime.J([%e p],[%e x]) :: [%e aux xs]]
+    in
+    aux pp in
+  [%expr Trace_ppx_runtime.Runtime.meta [%e name] [%e ppl]]
 
 let log ~loc name ~rid  key data =
   [%expr Trace_ppx_runtime.Runtime.log ~runtime_id:![%e rid] [%e name] [%e key] [%e data]]
@@ -263,6 +275,24 @@ let spy_extension =
 
 let spy_rule = Context_free.Rule.extension spy_extension
 
+let err_meta ~loc () = err ~loc "use: [%meta id pp x]"
+
+let meta_expand_function ~loc ~path:_ = function
+  | { pexp_desc = Pexp_apply(name, args); _} when is_string_literal name ->
+     if !enabled then
+       meta ~loc err_meta name (List.map snd args)
+     else [%expr ()]
+  | _ -> err_meta ~loc ()
+
+let meta_extension =
+  Extension.declare
+    "meta"
+    Extension.Context.expression
+    Ast_pattern.(single_expr_payload __)
+    meta_expand_function
+
+let meta_rule = Context_free.Rule.extension meta_extension
+
 (* ----------------------------------------------------------------- *)
 
 let tcall_expand_function ~loc ~path:_ = function
@@ -381,7 +411,7 @@ let arg_trace t =
 let () =
   Driver.Cookies.add_handler arg_trace;
   Driver.register_transformation
-    ~rules:[ log_rule; cur_pred_rule; trace_rule; tcall_rule; spy_rule; spyl_rule; end_trace_rule ]
+    ~rules:[ log_rule; cur_pred_rule; trace_rule; tcall_rule; spy_rule; spyl_rule; meta_rule; end_trace_rule ]
     ~impl:map_trace#structure
     ~intf:map_trace#signature
     "elpi.trace"

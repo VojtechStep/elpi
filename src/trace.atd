@@ -17,7 +17,7 @@ type item = {
   name : string;
   payload : string list;
 }
-type kind = [ Start | Info | Stop of stop ]
+type kind = [ Start | Info | Stop of stop | Meta ]
 type stop = { cause : string; time : float }
 type raw_trace = item list
 
