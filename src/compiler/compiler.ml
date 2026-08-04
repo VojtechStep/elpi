@@ -184,25 +184,45 @@ module Builtins : sig
 
   type t
   val pp : Format.formatter -> t -> unit
+  val register_source : t -> string -> string -> t
   val register : t -> D.BuiltInPredicate.t -> constant -> t
   val is_declared : t -> constant -> bool
   val fold : (constant -> Data.BuiltInPredicate.t -> 'a -> 'a) -> t -> 'a -> 'a
+  val sources : t -> string StrMap.t
   val empty : t
 
 end = struct
-  type t = Data.BuiltInPredicate.t Constants.Map.t
+  type t = {
+      predicates : Data.BuiltInPredicate.t Constants.Map.t;
+      sources : string StrMap.t
+  }
   [@@deriving show]
-  let empty = Constants.Map.empty
-  let fold = Constants.Map.fold
+  let empty = {
+      predicates = Constants.Map.empty;
+      sources = StrMap.empty
+    }
+  let fold f t = Constants.Map.fold f t.predicates
+
+  let sources t = t.sources
+
+  let register_source t name src =
+    if name = "" then anomaly "Built-in file name must be non empty";
+    match StrMap.find_opt name t.sources with
+    | None -> { t with sources = StrMap.add name src t.sources }
+    | Some existing ->
+       if existing <> src
+       then anomaly @@
+         "Built-in file " ^ name ^ "already registered with different source"
+       else t
 
 let register t (D.BuiltInPredicate.Pred(s,_,_) as b) idx =
   if s = "" then anomaly "Built-in predicate name must be non empty";
-  if Constants.Map.mem idx t then
+  if Constants.Map.mem idx t.predicates then
     anomaly ("Duplicate built-in predicate " ^ s);
-  Constants.Map.add idx b t
+  { t with predicates = Constants.Map.add idx b t.predicates }
 ;;
 
-let is_declared t x = Constants.Map.mem x t
+let is_declared t x = Constants.Map.mem x t.predicates
 
 end
 
@@ -265,7 +285,7 @@ let build_predmap l =
 let declare_builtins ~file_name l =
   if Util.StrMap.mem file_name !declared_builtins then
     Util.error ("Canno declare builtins " ^ file_name ^ " twice");
-  declared_builtins := Util.StrMap.add file_name (build_predmap l,l) !declared_builtins;
+  declared_builtins := Util.StrMap.add file_name (build_predmap l,l,ref None) !declared_builtins;
   file_name
 
 let declared_builtins_of_file ~file_name =
@@ -277,10 +297,10 @@ let declared_builtins ~file_name =
 let file_of_declared_builtins x = x
 
 let document_fmt fmt ~calc file_name =
-  let _, l = declared_builtins ~file_name in
+  let _, l, _ = declared_builtins ~file_name in
   Data.BuiltInPredicate.document fmt l calc
 let document_file ?header:_ ~calc ~file:name file_name =
-  let _, l = declared_builtins ~file_name in
+  let _, l, _ = declared_builtins ~file_name in
   let oc = open_out name in
   let fmt = Format.formatter_of_out_channel oc in
   Data.BuiltInPredicate.document fmt l calc;
@@ -289,13 +309,14 @@ let document_file ?header:_ ~calc ~file:name file_name =
 
 
 let ast_of_builtins ~calc ~(parser: (module Parse.Parser)) ~file_name =
-  let _, decls = declared_builtins ~file_name in
+  let _, decls, src = declared_builtins ~file_name in
   (* This is a bit ugly, since we print and then parse... *)
   let b = Buffer.create 1024 in
   let fmt = Format.formatter_of_buffer b in
   Data.BuiltInPredicate.document fmt decls calc;
   Format.pp_print_flush fmt ();
   let text = Buffer.contents b in
+  src := Some text;
   let lexbuf = Lexing.from_string text in
   let module P = (val parser) in
   try
@@ -1526,7 +1547,7 @@ end = struct
     let det_check_time = ref 0.0 in
 
     let builtins = builtins |> Option.map (fun file_name -> 
-      let builtins, _ = declared_builtins ~file_name in
+      let builtins, _, _ = declared_builtins ~file_name in
       StrMap.fold (fun _ (BuiltInPredicate.Pred(name,_,_)) acc ->
       let symb =
         match TypingEnv.resolve_name (F.from_string name) new_types with
@@ -2201,12 +2222,18 @@ let extend1 flags (state, base) unit =
 
   let symbols, builtins =
     Option.fold ~some:(fun (builtins,file_name) ->
-      let bm, _ = declared_builtins ~file_name in
+      let bm, _, src = declared_builtins ~file_name in
+      let ob = match !src with
+        | None -> ob
+        | Some src -> Builtins.register_source ob file_name src
+      in
       List.fold_left (fun (symbols,builtins) (symb, name) ->
         let p = StrMap.find name bm in
         let symbols, (c,_) = SymbolMap.allocate_global_symbol state symbols symb in
         let builtins = Builtins.register builtins p c in
-        symbols, builtins) (symbols, ob) builtins)
+        symbols, builtins)
+        (symbols, ob)
+        builtins)
      ~none:(symbols, ob) builtins
     in
 
@@ -2287,7 +2314,7 @@ let print_unit { print_units } x =
       Printf.eprintf "UNIT %s:\n  size: %5dk clauses: %5d builtins: %5d digest: 0x%s\n  deps: %s\n\n%!"
         x.file_name
         (Bytes.length b1 / 1024) (List.length x.code.Flat.clauses)
-        (Option.fold ~none:0 ~some:(fun file_name -> List.length (declared_builtins ~file_name |> snd)) x.code.Flat.builtins)
+        (Option.fold ~none:0 ~some:(fun file_name -> List.length (declared_builtins ~file_name |> function (_,l,_) -> l)) x.code.Flat.builtins)
         (Digest.to_hex x.digest)
         (if x.deps <> [] then "\n  - " ^ String.concat "\n  - "
             (List.mapi (fun i (f,d) -> Printf.sprintf "%d: %s, digest: 0x%s" (i+1) f (Digest.to_hex d)) x.deps) else "none")
@@ -2389,6 +2416,8 @@ let compile_builtins b =
   let builtins = Hashtbl.create 17 in
   let () = Builtins.fold (fun c p () -> Hashtbl.add builtins c p) b () in
   builtins
+
+let sources_builtins = Builtins.sources
 
 let query_of_ast (compiler_state, assembled_program) t state_update =
   let compiler_state = State.begin_goal_compilation compiler_state in
@@ -2546,6 +2575,7 @@ let run
     assignments;
     symbol_table;
     builtins = compile_builtins builtins;
+    builtins_source = sources_builtins builtins;
   }
 
 end (* }}} *)

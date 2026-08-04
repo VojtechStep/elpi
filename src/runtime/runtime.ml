@@ -2249,6 +2249,7 @@ let () = do_apparg_deref := deref_apparg
 module FFI = struct
 
 let builtins : Data.BuiltInPredicate.builtin_table ref = Fork.new_local (Hashtbl.create 17)
+let builtins_source : Data.BuiltInPredicate.builtins_source ref = Fork.new_local StrMap.empty
 let lookup c = Hashtbl.find !builtins c
 
 let type_err ~depth bname n ty t =
@@ -3818,6 +3819,7 @@ let try_fire_rule (gid[@trace]) rule (constraints as orig_constraints) =
     initial_runtime_state = !CS.initial_state;
     symbol_table = !C.table;
     builtins = !FFI.builtins;
+    builtins_source = !FFI.builtins_source;
   } in
   let { search; get; exec; destroy } = !do_make_runtime executable in
  
@@ -4277,6 +4279,7 @@ let make_runtime : ?max_steps: int -> ?delay_outside_fragment: bool -> executabl
       initial_runtime_state = !CS.initial_state;
       symbol_table = !C.table;
       builtins = !FFI.builtins;
+      builtins_source = !FFI.builtins_source;
     } in
     let { search; next_solution; destroy; get; _ } = !do_make_runtime executable in
     let solutions = ref [] in
@@ -4420,6 +4423,7 @@ end;*)
     assignments;
     symbol_table;
     builtins;
+    builtins_source;
   } ->
   let { Fork.exec = exec ; get = get ; set = set } = Fork.fork () in
   set orig_prolog_program compiled_program;
@@ -4438,10 +4442,13 @@ end;*)
   set CS.initial_state initial_runtime_state;
   set C.table symbol_table;
   set FFI.builtins builtins;
+  set FFI.builtins_source builtins_source;
   set rid !max_runtime_id;
   let search = exec (fun () ->
       if !is_first_runtime then begin
         [%meta "trace_version" pp_string trace_version];
+        let () = StrMap.bindings builtins_source |> List.iter (fun (name, text) ->
+          [%meta "user:debug:source" pp_string name pp_string text]) in
         is_first_runtime := false end;
      [%spy "dev:trail:init" ~rid (fun fmt () -> T.print_trail fmt) ()];
      let gid[@trace] = UUID.make () in

@@ -1712,6 +1712,9 @@ let document fmt l calc_list =
 type builtin_table = (int, t) Hashtbl.t
 [@@deriving show]
 
+type builtins_source = string StrMap.t
+[@@deriving show]
+
 end
 
 type symbol_table = {
@@ -1735,6 +1738,8 @@ type executable = {
   symbol_table : symbol_table;
   (* Indexed FFI entry points *)
   builtins : BuiltInPredicate.builtin_table;
+  (* Debug info *)
+  builtins_source: BuiltInPredicate.builtins_source;
   (* solution *)
   assignments : term Util.StrMap.t;
 }
