@@ -4143,6 +4143,8 @@ let make_runtime : ?max_steps: int -> ?delay_outside_fragment: bool -> executabl
               [%spy "user:rule:builtin" ~rid ~gid pp_string "fail"];
               [%tcall next_alt alts] end
     | Builtin(Host c, args) -> [%spy "user:rule" ~rid ~gid pp_string "builtin"]; [%spy "user:rule:builtin:name" ~rid ~gid pp_string (C.show c)];
+      let symb_loc[@trace] = (!C.table).c2s |> Constants.Map.find_opt c |> Option.map Symbol.get_loc in
+      [%spy "user:rule:builtin:loc" ~rid ~gid (pp_option Loc.pp) symb_loc];
       let once ~depth g state =
         CS.state := state;
         let { depth; program; goal; gid = gid [@trace] } = (make_subgoal[@inlined]) (gid[@trace]) ~depth p g in
